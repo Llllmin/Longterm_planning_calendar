@@ -4,6 +4,8 @@ import calendar
 import datetime
 from dataclasses import dataclass
 
+import json
+import os
 
 @dataclass
 class Goal:
@@ -11,6 +13,45 @@ class Goal:
     start: datetime.date
     end: datetime.date
     color: str
+
+
+DATA_FILE = "goals.json"
+
+
+def load_goals() -> list[Goal]:
+    if not os.path.exists(DATA_FILE):
+        return []
+
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    goals = []
+    for item in data:
+        goals.append(
+            Goal(
+                name=item["name"],
+                start=datetime.date.fromisoformat(item["start"]),
+                end=datetime.date.fromisoformat(item["end"]),
+                color=item["color"]
+            )
+        )
+    return goals
+
+
+def save_goals(goals: list[Goal]):
+    print("DEBUG: saving goals", len(goals))
+    data = []
+    for g in goals:
+        data.append({
+            "name": g.name,
+            "start": g.start.isoformat(),
+            "end": g.end.isoformat(),
+            "color": g.color
+        })
+
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
 
 
 def parse_date(s: str) -> datetime.date:
@@ -161,11 +202,16 @@ def main():
     root = tk.Tk()
     root.title("Long-term Planning Calendar")
 
-    goals = [
-        Goal("IB CS", datetime.date(2026, 1, 5), datetime.date(2026, 2, 10), "#4f7cff"),
-        Goal("Math HL", datetime.date(2025, 12, 20), datetime.date(2026, 1, 18), "#f28c28"),
-        Goal("TOK Essay", datetime.date(2026, 1, 10), datetime.date(2026, 1, 25), "#2ea043"),
-    ]
+    goals = load_goals()
+    if not goals:
+        goals = [
+            Goal(
+                "Example Goal",
+                datetime.date(2026, 2, 5),
+                datetime.date(2026, 2, 20),
+                "#4f7cff"
+            )
+        ]
 
     year, month = 2026, 2
 
@@ -250,7 +296,7 @@ def main():
                 goal.start = new_start
                 goal.end = new_end
                 goal.color = colors[color_name_var.get()]
-
+                save_goals(goals)
                 cal_view.draw()
                 win.destroy()
             except Exception as e:
@@ -263,6 +309,7 @@ def main():
                     goals.remove(goal)
                 except ValueError:
                     pass
+                save_goals(goals)
                 cal_view.draw()
                 win.destroy()
 
@@ -317,6 +364,7 @@ def main():
                 raise ValueError("Start date must be ≤ end date.")
 
             goals.append(Goal(name, start, end, colors[color_name.get()]))
+            save_goals(goals)
             cal_view.draw()
         except Exception as e:
             messagebox.showerror("Invalid input", str(e))
