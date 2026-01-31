@@ -82,6 +82,12 @@ class MonthView(tk.Canvas):
 
         self.goal_hitboxes = []
         self.bind("<Button-1>", self._handle_click)
+        self.bind("<Motion>", self._handle_hover)
+
+        # 🔑 一定要在 draw() 之前
+        self._tooltip = None
+        self._hover_goal = None
+
         self.draw()
 
     def set_month(self, year, month):
@@ -89,7 +95,57 @@ class MonthView(tk.Canvas):
         self.month = month
         self.draw()
 
+    def _handle_hover(self, event):
+        for hb in self.goal_hitboxes:
+            if hb["x0"] <= event.x <= hb["x1"] and hb["y0"] <= event.y <= hb["y1"]:
+                goal = hb["goal"]
+                if self._hover_goal != goal:
+                    self._show_tooltip(goal, event)
+                return
+
+        self._hide_tooltip()
+
+    def _show_tooltip(self, goal, event):
+        self._hide_tooltip()
+
+        self._hover_goal = goal
+        tip = tk.Toplevel(self)
+        tip.wm_overrideredirect(True)  # 无边框
+        tip.attributes("-topmost", True)
+
+        x = self.winfo_rootx() + event.x + 12
+        y = self.winfo_rooty() + event.y + 12
+        tip.wm_geometry(f"+{x}+{y}")
+
+        frame = tk.Frame(tip, bg="#222", padx=8, pady=6)
+        frame.pack()
+
+        tk.Label(
+            frame,
+            text=goal.name,
+            fg="white",
+            bg="#222",
+            font=("Arial", 10, "bold")
+        ).pack(anchor="w")
+
+        tk.Label(
+            frame,
+            text=f"{goal.start} → {goal.end}",
+            fg="#ddd",
+            bg="#222",
+            font=("Arial", 9)
+        ).pack(anchor="w")
+
+        self._tooltip = tip
+
+    def _hide_tooltip(self):
+        if self._tooltip:
+            self._tooltip.destroy()
+            self._tooltip = None
+            self._hover_goal = None
+
     def draw(self):
+        self._hide_tooltip()
         self.delete("all")
         self.goal_hitboxes.clear()
 
@@ -133,11 +189,44 @@ class MonthView(tk.Canvas):
         self._draw_goals()
 
     def _draw_goals(self):
+        # 统计：每一周同时存在多少个 goal
+        row_goal_count = {r: 0 for r in range(6)}
+
+        visible_start, visible_end = self.month_dates[0], self.month_dates[-1]
+
+        for goal in self.goals:
+            s = max(goal.start, visible_start)
+            e = min(goal.end, visible_end)
+            if s > e:
+                continue
+
+            covered_rows = set()
+            cur = s
+            while cur <= e:
+                idx = self.month_dates.index(cur)
+                r, _ = divmod(idx, 7)
+                covered_rows.add(r)
+                cur += datetime.timedelta(days=1)
+
+            for r in covered_rows:
+                row_goal_count[r] += 1
+
+        def lane_height_for_row(r):
+            lanes = max(1, row_goal_count[r])
+            usable = self.cell_h - base_y - 8
+            h = (usable - (lanes - 1) * lane_gap) // lanes
+            return max(5, min(16, h))
+
         date_to_idx = {d: i for i, d in enumerate(self.month_dates)}
         visible_start, visible_end = self.month_dates[0], self.month_dates[-1]
 
-        lane_h, lane_gap, base_y = 16, 4, 26
+        base_y = 26
+        lane_gap = 3
         lanes_per_row = {}
+
+        # 统计：每一周最多需要多少条 lane
+
+        row_lane_count = {r: 0 for r in range(6)}
 
         # NOTE: current simple lane assignment (can be upgraded later)
         for goal in self.goals:
@@ -152,6 +241,14 @@ class MonthView(tk.Canvas):
                 cur += datetime.timedelta(days=1)
 
             by_row = {}
+            for r, cols in by_row.items():
+                cols.sort()
+                segments = 1
+                for i in range(1, len(cols)):
+                    if cols[i] != cols[i - 1] + 1:
+                        segments += 1
+                row_lane_count[r] += segments
+
             for idx in idxs:
                 r, c = divmod(idx, 7)
                 by_row.setdefault(r, []).append(c)
@@ -170,16 +267,17 @@ class MonthView(tk.Canvas):
                         x1 = self.pad + (prev + 1) * self.cell_w
                         y0 = self.grid_top + r * self.cell_h
 
+                        lane_h = lane_height_for_row(r)
                         bar_y0 = y0 + base_y + lane * (lane_h + lane_gap)
                         bar_y1 = bar_y0 + lane_h
+
 
                         self.create_rectangle(x0 + 6, bar_y0, x1 - 6, bar_y1, fill=goal.color, outline="")
                         self.goal_hitboxes.append({
                             "x0": x0 + 6, "y0": bar_y0, "x1": x1 - 6, "y1": bar_y1,
                             "goal": goal
                         })
-
-                        if start == cols[0]:
+                        if lane_h >= 10 and start == cols[0]:
                             self.create_text(
                                 x0 + 10, (bar_y0 + bar_y1) / 2,
                                 text=goal.name,
@@ -190,6 +288,7 @@ class MonthView(tk.Canvas):
 
                         start = c
                     prev = c
+
 
     def _handle_click(self, event):
         for hb in reversed(self.goal_hitboxes):

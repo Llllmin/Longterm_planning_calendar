@@ -2,7 +2,31 @@
   {
     "name": "Database_learning",
     "start": "2026-02-01",
-    "end": "2026-02-23",
+    "end": "2026-02-10",
     "color": "#a371f7"
+  },
+  {
+    "name": "Basic_algorithm",
+    "start": "2026-02-11",
+    "end": "2026-02-24",
+    "color": "#a371f7"
+  },
+  {
+    "name": "translation_website",
+    "start": "2026-02-01",
+    "end": "2026-02-06",
+    "color": "#4f7cff"
+  },
+  {
+    "name": "\u7b14\u9762\u8bd5\u57fa\u7840\u8bfe+generalmath",
+    "start": "2026-02-01",
+    "end": "2026-02-20",
+    "color": "#ff6aa2"
+  },
+  {
+    "name": "cs IA",
+    "start": "2026-02-01",
+    "end": "2027-03-01",
+    "color": "#6e7681"
   }
 ]
