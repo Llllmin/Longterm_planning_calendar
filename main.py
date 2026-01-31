@@ -13,12 +13,26 @@ class Goal:
     color: str
 
 
+def parse_date(s: str) -> datetime.date:
+    return datetime.date.fromisoformat(s.strip())
+
+
+def shift_month(y, m, delta):
+    m += delta
+    if m == 0:
+        return y - 1, 12
+    if m == 13:
+        return y + 1, 1
+    return y, m
+
+
 class MonthView(tk.Canvas):
-    def __init__(self, master, year, month, goals, **kwargs):
+    def __init__(self, master, year, month, goals, on_goal_click, **kwargs):
         super().__init__(master, **kwargs)
         self.year = year
         self.month = month
         self.goals = goals
+        self.on_goal_click = on_goal_click
 
         self.pad = 18
         self.weekday_h = 32
@@ -26,7 +40,7 @@ class MonthView(tk.Canvas):
         self.cell_h = 80
 
         self.goal_hitboxes = []
-        self.bind("<Button-1>", self.on_click)
+        self.bind("<Button-1>", self._handle_click)
         self.draw()
 
     def set_month(self, year, month):
@@ -81,51 +95,10 @@ class MonthView(tk.Canvas):
         date_to_idx = {d: i for i, d in enumerate(self.month_dates)}
         visible_start, visible_end = self.month_dates[0], self.month_dates[-1]
 
-        base_y = 26
-        lane_gap = 3  # 稍微紧一点
+        lane_h, lane_gap, base_y = 16, 4, 26
         lanes_per_row = {}
 
-        # --- 先做一次“预计算”：每一周(row)最多会画几条 lane ---
-        # 我们先数出每个 row 里会出现多少个 segment（粗略上限）
-        cal = calendar.Calendar(firstweekday=0)
-        month_dates = self.month_dates
-        date_to_idx = {d: i for i, d in enumerate(month_dates)}
-        visible_start, visible_end = month_dates[0], month_dates[-1]
-
-        row_need = [0] * 6  # 6 rows in month view
-
-        for goal in self.goals:
-            s, e = max(goal.start, visible_start), min(goal.end, visible_end)
-            if s > e:
-                continue
-
-            # collect cols by row
-            cur = s
-            by_row = {}
-            while cur <= e:
-                idx = date_to_idx[cur]
-                r, c = divmod(idx, 7)
-                by_row.setdefault(r, []).append(c)
-                cur += datetime.timedelta(days=1)
-
-            # count segments per row (每一段连续日期算一个 segment)
-            for r, cols in by_row.items():
-                cols.sort()
-                seg = 1
-                for i in range(1, len(cols)):
-                    if cols[i] != cols[i - 1] + 1:
-                        seg += 1
-                row_need[r] += seg
-
-        # --- 根据“需要的 lane 数”动态计算 lane_h，让它能塞进格子高度 ---
-        def lane_height_for_row(r: int) -> int:
-            lanes = max(1, row_need[r])
-            usable = self.cell_h - base_y - 10  # 留点底部空白
-            h = (usable - (lanes - 1) * lane_gap) // lanes
-            return max(6, min(16, h))  # 最细6px，最粗16px
-
-        # 之后画的时候，lane_h 不再是固定值，而是 lane_height_for_row(r)
-
+        # NOTE: current simple lane assignment (can be upgraded later)
         for goal in self.goals:
             s, e = max(goal.start, visible_start), min(goal.end, visible_end)
             if s > e:
@@ -156,18 +129,15 @@ class MonthView(tk.Canvas):
                         x1 = self.pad + (prev + 1) * self.cell_w
                         y0 = self.grid_top + r * self.cell_h
 
-                        lane_h = lane_height_for_row(r)
                         bar_y0 = y0 + base_y + lane * (lane_h + lane_gap)
                         bar_y1 = bar_y0 + lane_h
 
                         self.create_rectangle(x0 + 6, bar_y0, x1 - 6, bar_y1, fill=goal.color, outline="")
-
                         self.goal_hitboxes.append({
                             "x0": x0 + 6, "y0": bar_y0, "x1": x1 - 6, "y1": bar_y1,
                             "goal": goal
                         })
 
-                        # label only once per row segment startx
                         if start == cols[0]:
                             self.create_text(
                                 x0 + 10, (bar_y0 + bar_y1) / 2,
@@ -180,25 +150,11 @@ class MonthView(tk.Canvas):
                         start = c
                     prev = c
 
-    def on_click(self, event):
+    def _handle_click(self, event):
         for hb in reversed(self.goal_hitboxes):
             if hb["x0"] <= event.x <= hb["x1"] and hb["y0"] <= event.y <= hb["y1"]:
-                g = hb["goal"]
-                messagebox.showinfo("Goal details", f"{g.name}\n{g.start} → {g.end}")
+                self.on_goal_click(hb["goal"])
                 return
-
-
-def parse_date(s: str) -> datetime.date:
-    return datetime.date.fromisoformat(s.strip())
-
-
-def shift_month(y, m, delta):
-    m += delta
-    if m == 0:
-        return y - 1, 12
-    if m == 13:
-        return y + 1, 1
-    return y, m
 
 
 def main():
@@ -211,7 +167,7 @@ def main():
         Goal("TOK Essay", datetime.date(2026, 1, 10), datetime.date(2026, 1, 25), "#2ea043"),
     ]
 
-    year, month = 2026, 2  # start month
+    year, month = 2026, 2
 
     # ===== Top bar: title + prev/next =====
     top = tk.Frame(root)
@@ -237,14 +193,91 @@ def main():
     tk.Button(top, text="← Prev", command=prev_month).pack(side="left", padx=8)
     tk.Label(top, textvariable=title_var, font=("Arial", 22, "bold")).pack(side="left", padx=14)
     tk.Button(top, text="Next →", command=next_month).pack(side="left", padx=8)
-
     update_title()
 
     # ===== Main area: calendar + right panel =====
     body = tk.Frame(root)
     body.pack(padx=12, pady=10)
 
-    cal_view = MonthView(body, year, month, goals, bg="white", highlightthickness=0)
+    # colors for UI
+    colors = {
+        "Blue": "#4f7cff",
+        "Orange": "#f28c28",
+        "Green": "#2ea043",
+        "Purple": "#a371f7",
+        "Pink": "#ff6aa2",
+        "Gray": "#6e7681",
+    }
+    # reverse map for dropdown default selection
+    rev_colors = {v: k for k, v in colors.items()}
+
+    def open_goal_editor(goal: Goal):
+        win = tk.Toplevel(root)
+        win.title("Edit goal")
+        win.resizable(False, False)
+
+        frm = tk.Frame(win, padx=12, pady=12)
+        frm.pack()
+
+        tk.Label(frm, text="Name").grid(row=0, column=0, sticky="w")
+        name_var = tk.StringVar(value=goal.name)
+        tk.Entry(frm, textvariable=name_var, width=28).grid(row=0, column=1, pady=4)
+
+        tk.Label(frm, text="Start (YYYY-MM-DD)").grid(row=1, column=0, sticky="w")
+        start_var = tk.StringVar(value=goal.start.isoformat())
+        tk.Entry(frm, textvariable=start_var, width=28).grid(row=1, column=1, pady=4)
+
+        tk.Label(frm, text="End (YYYY-MM-DD)").grid(row=2, column=0, sticky="w")
+        end_var = tk.StringVar(value=goal.end.isoformat())
+        tk.Entry(frm, textvariable=end_var, width=28).grid(row=2, column=1, pady=4)
+
+        tk.Label(frm, text="Color").grid(row=3, column=0, sticky="w")
+        color_name_var = tk.StringVar(value=rev_colors.get(goal.color, "Blue"))
+        tk.OptionMenu(frm, color_name_var, *colors.keys()).grid(row=3, column=1, sticky="w", pady=4)
+
+        def save_changes():
+            try:
+                new_name = name_var.get().strip()
+                if not new_name:
+                    raise ValueError("Name cannot be empty.")
+
+                new_start = parse_date(start_var.get())
+                new_end = parse_date(end_var.get())
+                if new_start > new_end:
+                    raise ValueError("Start date must be ≤ end date.")
+
+                goal.name = new_name
+                goal.start = new_start
+                goal.end = new_end
+                goal.color = colors[color_name_var.get()]
+
+                cal_view.draw()
+                win.destroy()
+            except Exception as e:
+                messagebox.showerror("Invalid input", str(e), parent=win)
+
+        def delete_goal():
+            # simple confirm
+            if messagebox.askyesno("Delete", f"Delete '{goal.name}'?", parent=win):
+                try:
+                    goals.remove(goal)
+                except ValueError:
+                    pass
+                cal_view.draw()
+                win.destroy()
+
+        btns = tk.Frame(frm)
+        btns.grid(row=4, column=0, columnspan=2, pady=(10, 0), sticky="e")
+
+        tk.Button(btns, text="Delete", command=delete_goal).pack(side="left", padx=(0, 8))
+        tk.Button(btns, text="Save changes", command=save_changes).pack(side="left")
+
+    cal_view = MonthView(
+        body, year, month, goals,
+        on_goal_click=open_goal_editor,
+        bg="white",
+        highlightthickness=0
+    )
     cal_view.grid(row=0, column=0, padx=(0, 14), pady=0)
 
     # ---- Right panel: add goals ----
@@ -269,14 +302,6 @@ def main():
     end_entry.pack(anchor="w", pady=(0, 10))
 
     tk.Label(panel, text="Color").pack(anchor="w")
-    colors = {
-        "Blue": "#4f7cff",
-        "Orange": "#f28c28",
-        "Green": "#2ea043",
-        "Purple": "#a371f7",
-        "Pink": "#ff6aa2",
-        "Gray": "#6e7681",
-    }
     color_name = tk.StringVar(value="Purple")
     tk.OptionMenu(panel, color_name, *colors.keys()).pack(anchor="w", pady=(0, 10))
 
@@ -297,11 +322,10 @@ def main():
             messagebox.showerror("Invalid input", str(e))
 
     tk.Button(panel, text="Add", command=add_goal).pack(anchor="w", pady=(0, 6))
-    tk.Label(panel, text="Tip: click a bar to view details.", fg="#555").pack(anchor="w")
+    tk.Label(panel, text="Tip: click a bar to edit / delete.", fg="#555").pack(anchor="w")
 
     root.mainloop()
 
 
 if __name__ == "__main__":
     main()
-
